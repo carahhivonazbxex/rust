@@ -1,6 +1,7 @@
 use rustc_hir::attrs::AttributeKind;
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::{Expr, ExprKind, ItemKind, Node, find_attr};
+use rustc_middle::ty::adjustment::Adjust;
 use rustc_session::{declare_lint, declare_lint_pass};
 
 use crate::lints::{ConstItemInteriorMutationsDiag, ConstItemInteriorMutationsSuggestionStatic};
@@ -73,6 +74,17 @@ impl<'tcx> LateLintPass<'tcx> for InteriorMutableConsts {
         let Some(method_did) = method_did else {
             return;
         };
+
+        if cx
+            .typeck_results()
+            .expr_adjustments(receiver)
+            .into_iter()
+            .any(|adj| matches!(adj.kind, Adjust::Deref(_)))
+        {
+            // Bail-out if there are any derefs as those can do arbitrary things
+            // like using thread local (see rust-lang/rust#150157)
+            return;
+        }
 
         if let ExprKind::Path(qpath) = &receiver.kind
             && let Res::Def(DefKind::Const | DefKind::AssocConst, const_did) =
